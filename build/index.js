@@ -45,47 +45,72 @@ const nodemailer_1 = __importDefault(require("nodemailer"));
 const app = (0, express_1.default)();
 app.use(body_parser_1.default.urlencoded({ extended: false }));
 app.use(body_parser_1.default.json());
-app.use(function (req, res, next) {
-    const err = new Error('Not Found');
-    res.status(404); // using response here
-    next(err);
-});
-app.use((error, req, res, next) => {
-    res.status(error.status || 500);
-    res.json({
-        error: {
-            message: error.message,
-        },
-    });
-});
+const error400 = {
+    status: 400,
+    message: 'Bad Request',
+};
 mongoose_1.default.connect(process.env.DB_URL);
 //GET
 app.get('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const allContacts = yield contactSchema_1.Contact.find({});
-    res.send(allContacts);
+    try {
+        const allContacts = yield contactSchema_1.Contact.find({});
+        res.send(allContacts);
+    }
+    catch (error) {
+        res.status(500).send(error);
+    }
 }));
 app.get('/contacts/:id', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { id } = req.params;
-    const foundContact = yield contactSchema_1.Contact.findById(id);
-    res.send(foundContact);
+    try {
+        const { id } = req.params;
+        const foundContact = yield contactSchema_1.Contact.findById(id);
+        res.send(foundContact);
+    }
+    catch (error) {
+        res.status(404).send(error);
+    }
 }));
 app.get('/about', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     res.send(data);
 }));
 //POST
 app.post('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    let fechaHoy = new Date();
+    const dd = String(fechaHoy.getDate()).padStart(2, '0');
+    const mm = String(fechaHoy.getMonth() + 1).padStart(2, '0');
+    const yyyy = fechaHoy.getFullYear();
+    let dayB = req.body.dayB;
+    let monthB = req.body.monthB;
+    let yearB = req.body.yearB;
+    let edadActual = yyyy - Number(yearB);
+    if (mm <= monthB || dd < dayB) {
+        edadActual -= 1;
+    }
     const newContact = new contactSchema_1.Contact({
         name: req.body.name,
         surname: req.body.surname,
         nickname: req.body.nickname,
         email: req.body.email,
-        bornDate: req.body.bornDate,
-        age: req.body.age,
+        bornDate: `${dayB}/${monthB}/${yearB}`,
+        age: edadActual,
         phoneNumber: req.body.phoneNumber,
         adress: req.body.adress,
     });
-    yield newContact.save();
-    res.json(newContact);
+    if (dayB <= 31 &&
+        monthB <= 12 &&
+        yyyy > yearB &&
+        req.body.name &&
+        req.body.surname &&
+        req.body.email &&
+        req.body.phoneNumber &&
+        req.body.adress) {
+        yield newContact.save();
+        res.json(newContact);
+    }
+    else {
+        res.status(400);
+        res.json(error400);
+    }
 }));
 app.post(`/contacts/:id/mail`, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
@@ -102,7 +127,7 @@ app.post(`/contacts/:id/mail`, (req, res) => __awaiter(void 0, void 0, void 0, f
         secure: false,
         auth: {
             user: 'teyema1630@hotmail.com',
-            pass: 'Contactera2022',
+            pass: process.env.MAIL_PASS,
         },
     });
     yield transporter.sendMail(mailOptions, (err, info) => {

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { Contact } from './contactSchema';
 import * as data from './data.json';
@@ -12,44 +12,32 @@ app.use(bodyParser.urlencoded({ extended: false }));
 
 app.use(bodyParser.json());
 
-app.use(function (req, res, next) {
-  const err = new Error('Not Found');
-  res.status(404); // using response here
-  next(err);
-});
-
-app.use(
-  (
-    error: { status: any; message: any },
-    req: any,
-    res: {
-      status: (arg0: any) => void;
-      json: (arg0: { error: { message: any } }) => void;
-    },
-    next: any
-  ) => {
-    res.status(error.status || 500);
-    res.json({
-      error: {
-        message: error.message,
-      },
-    });
-  }
-);
+const error400 = {
+  status: 400,
+  message: 'Bad Request',
+};
 
 mongoose.connect(process.env.DB_URL!);
 
 //GET
 
 app.get('/contacts', async (req: Request, res: Response) => {
-  const allContacts = await Contact.find({});
-  res.send(allContacts);
+  try {
+    const allContacts = await Contact.find({});
+    res.send(allContacts);
+  } catch (error) {
+    res.status(500).send(error);
+  }
 });
 
 app.get('/contacts/:id', async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const foundContact = await Contact.findById(id);
-  res.send(foundContact);
+  try {
+    const { id } = req.params;
+    const foundContact = await Contact.findById(id);
+    res.send(foundContact);
+  } catch (error) {
+    res.status(404).send(error);
+  }
 });
 
 app.get('/about', async (req: Request, res: Response) => {
@@ -59,19 +47,48 @@ app.get('/about', async (req: Request, res: Response) => {
 //POST
 
 app.post('/contacts', async (req: Request, res: Response) => {
+  let fechaHoy: Date | string = new Date();
+  const dd = String(fechaHoy.getDate()).padStart(2, '0');
+  const mm = String(fechaHoy.getMonth() + 1).padStart(2, '0');
+  const yyyy = fechaHoy.getFullYear();
+
+  let dayB = req.body.dayB;
+  let monthB = req.body.monthB;
+  let yearB = req.body.yearB;
+
+  let edadActual = yyyy - Number(yearB);
+  if (mm <= monthB || dd < dayB) {
+    edadActual -= 1;
+  }
+
   const newContact = new Contact({
     name: req.body.name,
     surname: req.body.surname,
     nickname: req.body.nickname,
     email: req.body.email,
-    bornDate: req.body.bornDate,
-    age: req.body.age,
+    bornDate: `${dayB}/${monthB}/${yearB}`,
+    age: edadActual,
     phoneNumber: req.body.phoneNumber,
     adress: req.body.adress,
   });
-  await newContact.save();
 
-  res.json(newContact);
+  if (
+    dayB <= 31 &&
+    monthB <= 12 &&
+    yyyy > yearB &&
+    req.body.name &&
+    req.body.surname &&
+    req.body.email &&
+    req.body.phoneNumber &&
+    req.body.adress
+  ) {
+    await newContact.save();
+
+    res.json(newContact);
+  } else {
+    res.status(400);
+    res.json(error400);
+  }
 });
 
 app.post(`/contacts/:id/mail`, async (req: Request, res: Response) => {
