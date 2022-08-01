@@ -53,8 +53,14 @@ mongoose_1.default.connect(process.env.DB_URL);
 //GET
 app.get('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const allContacts = yield contactSchema_1.Contact.find({});
-        res.send(allContacts);
+        if (req.query) {
+            const allContacts = yield contactSchema_1.Contact.find(req.query);
+            res.send(allContacts);
+        }
+        else {
+            const allContacts = yield contactSchema_1.Contact.find({});
+            res.send(allContacts);
+        }
     }
     catch (error) {
         res.status(500).send(error);

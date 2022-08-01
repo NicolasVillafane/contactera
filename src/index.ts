@@ -23,8 +23,14 @@ mongoose.connect(process.env.DB_URL!);
 
 app.get('/contacts', async (req: Request, res: Response) => {
   try {
-    const allContacts = await Contact.find({});
-    res.send(allContacts);
+    if (req.query) {
+      const allContacts = await Contact.find(req.query);
+      res.send(allContacts);
+    } else {
+      const allContacts = await Contact.find({});
+
+      res.send(allContacts);
+    }
   } catch (error) {
     res.status(500).send(error);
   }
