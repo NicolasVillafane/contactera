@@ -42,6 +42,7 @@ const contactSchema_1 = require("./contactSchema");
 const data = __importStar(require("./data.json"));
 const body_parser_1 = __importDefault(require("body-parser"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const callback_api_1 = __importDefault(require("amqplib/callback_api"));
 const app = (0, express_1.default)();
 app.use(body_parser_1.default.urlencoded({ extended: false }));
 app.use(body_parser_1.default.json());
@@ -56,10 +57,12 @@ app.get('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (req.query) {
             const allContacts = yield contactSchema_1.Contact.find(req.query);
             res.send(allContacts);
+            queue(req);
         }
         else {
             const allContacts = yield contactSchema_1.Contact.find({});
-            res.send(allContacts);
+            res.json(allContacts);
+            queue(req);
         }
     }
     catch (error) {
@@ -71,6 +74,7 @@ app.get('/contacts/:id', (req, res) => __awaiter(void 0, void 0, void 0, functio
         const { id } = req.params;
         const foundContact = yield contactSchema_1.Contact.findById(id);
         res.send(foundContact);
+        queue(req);
     }
     catch (error) {
         res.status(404).send(error);
@@ -78,6 +82,7 @@ app.get('/contacts/:id', (req, res) => __awaiter(void 0, void 0, void 0, functio
 }));
 app.get('/about', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     res.send(data);
+    queue(req);
 }));
 //POST
 app.post('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -97,6 +102,9 @@ app.post('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* 
         surname: req.body.surname,
         nickname: req.body.nickname,
         email: req.body.email,
+        dayB: req.body.dayB,
+        monthB: req.body.monthB,
+        yearB: req.body.yearB,
         bornDate: `${dayB}/${monthB}/${yearB}`,
         age: edadActual,
         phoneNumber: req.body.phoneNumber,
@@ -112,6 +120,7 @@ app.post('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* 
         req.body.adress) {
         yield newContact.save();
         res.json(newContact);
+        queue(req);
     }
     else {
         res.status(400);
@@ -145,6 +154,7 @@ app.post(`/contacts/:id/mail`, (req, res) => __awaiter(void 0, void 0, void 0, f
         }
     });
     res.send(mailOptions);
+    queue(req);
 }));
 //PUT
 app.put(`/contacts/:id`, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -154,13 +164,51 @@ app.put(`/contacts/:id`, (req, res) => __awaiter(void 0, void 0, void 0, functio
         new: true,
     });
     res.send(contact);
+    queue(req);
 }));
 //DELETE
 app.delete(`/contacts/:id`, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     const deletedContact = yield contactSchema_1.Contact.findByIdAndDelete(id);
     res.send(deletedContact);
+    queue(req);
 }));
 app.listen(3000, () => {
     console.log('Listening on port 3000');
 });
+const queue = (req) => {
+    callback_api_1.default.connect('amqp://localhost', function (error0, connection) {
+        if (error0) {
+            throw error0;
+        }
+        connection.createChannel(function (error1, channel) {
+            if (error1) {
+                throw error1;
+            }
+            let date = new Date();
+            let event = {};
+            event = {
+                dateTime: date,
+                userId: Math.random().toString(36).slice(2),
+                uri: req.url,
+                method: req.method,
+                payload: {
+                    name: req.body.name,
+                    surname: req.body.surname,
+                    nickname: req.body.nickname,
+                    email: req.body.email,
+                    phoneNumber: req.body.phoneNumber,
+                    adress: req.body.adress,
+                },
+                parameters: req.query,
+            };
+            var queue = 'hello';
+            var msg = `${req.method}`;
+            channel.assertQueue(queue, {
+                durable: false,
+            });
+            channel.sendToQueue(queue, Buffer.from(JSON.stringify(event)));
+            console.log(' [x] Sent %s', event);
+        });
+    });
+};

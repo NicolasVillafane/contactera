@@ -1,15 +1,15 @@
 import 'dotenv/config';
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Contact } from './contactSchema';
 import * as data from './data.json';
 import bodyParser from 'body-parser';
 import nodemailer from 'nodemailer';
+import amqp from 'amqplib/callback_api';
 
 const app = express();
 
 app.use(bodyParser.urlencoded({ extended: false }));
-
 app.use(bodyParser.json());
 
 const error400 = {
@@ -25,11 +25,14 @@ app.get('/contacts', async (req: Request, res: Response) => {
   try {
     if (req.query) {
       const allContacts = await Contact.find(req.query);
+
       res.send(allContacts);
+      queue(req);
     } else {
       const allContacts = await Contact.find({});
 
-      res.send(allContacts);
+      res.json(allContacts);
+      queue(req);
     }
   } catch (error) {
     res.status(500).send(error);
@@ -41,6 +44,7 @@ app.get('/contacts/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const foundContact = await Contact.findById(id);
     res.send(foundContact);
+    queue(req);
   } catch (error) {
     res.status(404).send(error);
   }
@@ -48,6 +52,7 @@ app.get('/contacts/:id', async (req: Request, res: Response) => {
 
 app.get('/about', async (req: Request, res: Response) => {
   res.send(data);
+  queue(req);
 });
 
 //POST
@@ -72,6 +77,9 @@ app.post('/contacts', async (req: Request, res: Response) => {
     surname: req.body.surname,
     nickname: req.body.nickname,
     email: req.body.email,
+    dayB: req.body.dayB,
+    monthB: req.body.monthB,
+    yearB: req.body.yearB,
     bornDate: `${dayB}/${monthB}/${yearB}`,
     age: edadActual,
     phoneNumber: req.body.phoneNumber,
@@ -91,6 +99,7 @@ app.post('/contacts', async (req: Request, res: Response) => {
     await newContact.save();
 
     res.json(newContact);
+    queue(req);
   } else {
     res.status(400);
     res.json(error400);
@@ -126,6 +135,7 @@ app.post(`/contacts/:id/mail`, async (req: Request, res: Response) => {
     }
   });
   res.send(mailOptions);
+  queue(req);
 });
 
 //PUT
@@ -137,6 +147,7 @@ app.put(`/contacts/:id`, async (req: Request, res: Response) => {
     new: true,
   });
   res.send(contact);
+  queue(req);
 });
 
 //DELETE
@@ -145,8 +156,50 @@ app.delete(`/contacts/:id`, async (req: Request, res: Response) => {
   const { id } = req.params;
   const deletedContact = await Contact.findByIdAndDelete(id);
   res.send(deletedContact);
+  queue(req);
 });
 
 app.listen(3000, () => {
   console.log('Listening on port 3000');
 });
+
+const queue = (req: Request) => {
+  amqp.connect('amqp://localhost', function (error0, connection) {
+    if (error0) {
+      throw error0;
+    }
+    connection.createChannel(function (error1, channel) {
+      if (error1) {
+        throw error1;
+      }
+      let date = new Date();
+      let event = {};
+
+      event = {
+        dateTime: date,
+        userId: Math.random().toString(36).slice(2),
+        uri: req.url,
+        method: req.method,
+        payload: {
+          name: req.body.name,
+          surname: req.body.surname,
+          nickname: req.body.nickname,
+          email: req.body.email,
+          phoneNumber: req.body.phoneNumber,
+          adress: req.body.adress,
+        },
+        parameters: req.query,
+      };
+
+      var queue = 'hello';
+      var msg = `${req.method}`;
+
+      channel.assertQueue(queue, {
+        durable: false,
+      });
+      channel.sendToQueue(queue, Buffer.from(JSON.stringify(event)));
+
+      console.log(' [x] Sent %s', event);
+    });
+  });
+};

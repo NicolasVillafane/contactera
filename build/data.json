@@ -1,7 +1,7 @@
 {
     "name": "contactera",
     "version": "1.0.0",
-    "description": "",
+    "description": "An app made to keep track of your friends and family",
     "main": "index.js",
     "scripts": {
         "start:build": "tsc -w",
@@ -9,7 +9,7 @@
         "start": "concurrently npm:start:*"
     },
     "keywords": [],
-    "author": "",
+    "author": "Nicolas Villafañe",
     "license": "ISC",
     "dependencies": {
         "body-parser": "^1.20.0",
