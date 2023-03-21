@@ -1,16 +1,44 @@
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Contact } from './contactSchema';
+import { User } from './userSchema';
 import * as data from './data.json';
 import bodyParser from 'body-parser';
 import nodemailer from 'nodemailer';
 import amqp from 'amqplib/callback_api';
+import passport from 'passport';
+import { Strategy as LocalStrategy } from 'passport-local';
+import session from 'express-session';
+import { isLoggedIn } from './middleware';
 
 const app = express();
 
+app.use(
+  session({
+    secret: 'secret',
+    resave: true,
+    saveUninitialized: true,
+    cookie: {
+      httpOnly: true,
+      maxAge: 1000 * 60 * 60 * 24 * 7,
+    },
+  })
+);
+
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+app.use(passport.initialize());
+app.use(passport.session());
+passport.use(new LocalStrategy(User.authenticate()));
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.locals.currentUser = req.user;
+  next();
+});
 
 const error400 = {
   status: 400,
@@ -21,7 +49,7 @@ mongoose.connect(process.env.DB_URL!);
 
 //GET
 
-app.get('/contacts', async (req: Request, res: Response) => {
+app.get('/contacts', isLoggedIn, async (req: Request, res: Response) => {
   try {
     if (req.query) {
       const allContacts = await Contact.find(req.query);
@@ -39,7 +67,7 @@ app.get('/contacts', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/contacts/:id', async (req: Request, res: Response) => {
+app.get('/contacts/:id', isLoggedIn, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const foundContact = await Contact.findById(id);
@@ -55,9 +83,43 @@ app.get('/about', async (req: Request, res: Response) => {
   queue(req);
 });
 
+app.get('/logout', async (req: Request, res: Response, next: NextFunction) => {
+  req.logout(function (err) {
+    if (err) {
+      return next(err);
+    }
+    console.log('logged out');
+    res.redirect('/home');
+  });
+});
+
 //POST
 
-app.post('/contacts', async (req: Request, res: Response) => {
+app.post(
+  '/register',
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { email, username, password } = req.body;
+    const user = new User({ email, username });
+    const registeredUser = await User.register(user, password);
+    req.login(registeredUser, (err) => {
+      if (err) return err;
+      res.redirect('/contacts');
+    });
+  }
+);
+
+app.post(
+  '/login',
+  passport.authenticate('local', {
+    failureFlash: true,
+    failureRedirect: '/login',
+  }),
+  (req: Request, res: Response) => {
+    console.log('logged in!'), res.redirect('/contacts');
+  }
+);
+
+app.post('/contacts', isLoggedIn, async (req: Request, res: Response) => {
   let fechaHoy: Date | string = new Date();
   const dd = String(fechaHoy.getDate()).padStart(2, '0');
   const mm = String(fechaHoy.getMonth() + 1).padStart(2, '0');
@@ -106,41 +168,45 @@ app.post('/contacts', async (req: Request, res: Response) => {
   }
 });
 
-app.post(`/contacts/:id/mail`, async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const foundContact = await Contact.findById(id);
+app.post(
+  `/contacts/:id/mail`,
+  isLoggedIn,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const foundContact = await Contact.findById(id);
 
-  const mailOptions = {
-    from: 'teyema1630@hotmail.com',
-    to: foundContact!.email,
-    subject: req.body.subject,
-    text: req.body.text,
-  };
+    const mailOptions = {
+      from: 'teyema1630@hotmail.com',
+      to: foundContact!.email,
+      subject: req.body.subject,
+      text: req.body.text,
+    };
 
-  const transporter = nodemailer.createTransport({
-    service: 'Hotmail',
-    port: 467,
-    secure: false, // use SSL
-    auth: {
-      user: 'teyema1630@hotmail.com',
-      pass: process.env.MAIL_PASS,
-    },
-  });
+    const transporter = nodemailer.createTransport({
+      service: 'Hotmail',
+      port: 467,
+      secure: false, // use SSL
+      auth: {
+        user: 'teyema1630@hotmail.com',
+        pass: process.env.MAIL_PASS,
+      },
+    });
 
-  await transporter.sendMail(mailOptions, (err, info) => {
-    if (err) {
-      console.log(err);
-    } else {
-      console.log(mailOptions);
-    }
-  });
-  res.send(mailOptions);
-  queue(req);
-});
+    await transporter.sendMail(mailOptions, (err, info) => {
+      if (err) {
+        console.log(err);
+      } else {
+        console.log(mailOptions);
+      }
+    });
+    res.send(mailOptions);
+    queue(req);
+  }
+);
 
 //PUT
 
-app.put(`/contacts/:id`, async (req: Request, res: Response) => {
+app.put(`/contacts/:id`, isLoggedIn, async (req: Request, res: Response) => {
   const { id } = req.params;
   const contact = await Contact.findByIdAndUpdate(id, req.body, {
     runValidators: true,
@@ -152,7 +218,7 @@ app.put(`/contacts/:id`, async (req: Request, res: Response) => {
 
 //DELETE
 
-app.delete(`/contacts/:id`, async (req: Request, res: Response) => {
+app.delete(`/contacts/:id`, isLoggedIn, async (req: Request, res: Response) => {
   const { id } = req.params;
   const deletedContact = await Contact.findByIdAndDelete(id);
   res.send(deletedContact);

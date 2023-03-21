@@ -39,20 +39,43 @@ require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const contactSchema_1 = require("./contactSchema");
+const userSchema_1 = require("./userSchema");
 const data = __importStar(require("./data.json"));
 const body_parser_1 = __importDefault(require("body-parser"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const callback_api_1 = __importDefault(require("amqplib/callback_api"));
+const passport_1 = __importDefault(require("passport"));
+const passport_local_1 = require("passport-local");
+const express_session_1 = __importDefault(require("express-session"));
+const middleware_1 = require("./middleware");
 const app = (0, express_1.default)();
+app.use((0, express_session_1.default)({
+    secret: 'secret',
+    resave: true,
+    saveUninitialized: true,
+    cookie: {
+        httpOnly: true,
+        maxAge: 1000 * 60 * 60 * 24 * 7,
+    },
+}));
 app.use(body_parser_1.default.urlencoded({ extended: false }));
 app.use(body_parser_1.default.json());
+app.use(passport_1.default.initialize());
+app.use(passport_1.default.session());
+passport_1.default.use(new passport_local_1.Strategy(userSchema_1.User.authenticate()));
+passport_1.default.serializeUser(userSchema_1.User.serializeUser());
+passport_1.default.deserializeUser(userSchema_1.User.deserializeUser());
+app.use((req, res, next) => {
+    res.locals.currentUser = req.user;
+    next();
+});
 const error400 = {
     status: 400,
     message: 'Bad Request',
 };
 mongoose_1.default.connect(process.env.DB_URL);
 //GET
-app.get('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+app.get('/contacts', middleware_1.isLoggedIn, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (req.query) {
             const allContacts = yield contactSchema_1.Contact.find(req.query);
@@ -69,7 +92,7 @@ app.get('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* (
         res.status(500).send(error);
     }
 }));
-app.get('/contacts/:id', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+app.get('/contacts/:id', middleware_1.isLoggedIn, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
         const foundContact = yield contactSchema_1.Contact.findById(id);
@@ -84,8 +107,33 @@ app.get('/about', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     res.send(data);
     queue(req);
 }));
+app.get('/logout', (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    req.logout(function (err) {
+        if (err) {
+            return next(err);
+        }
+        console.log('logged out');
+        res.redirect('/home');
+    });
+}));
 //POST
-app.post('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+app.post('/register', (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    const { email, username, password } = req.body;
+    const user = new userSchema_1.User({ email, username });
+    const registeredUser = yield userSchema_1.User.register(user, password);
+    req.login(registeredUser, (err) => {
+        if (err)
+            return err;
+        res.redirect('/contacts');
+    });
+}));
+app.post('/login', passport_1.default.authenticate('local', {
+    failureFlash: true,
+    failureRedirect: '/login',
+}), (req, res) => {
+    console.log('logged in!'), res.redirect('/contacts');
+});
+app.post('/contacts', middleware_1.isLoggedIn, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     let fechaHoy = new Date();
     const dd = String(fechaHoy.getDate()).padStart(2, '0');
     const mm = String(fechaHoy.getMonth() + 1).padStart(2, '0');
@@ -127,7 +175,7 @@ app.post('/contacts', (req, res) => __awaiter(void 0, void 0, void 0, function* 
         res.json(error400);
     }
 }));
-app.post(`/contacts/:id/mail`, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+app.post(`/contacts/:id/mail`, middleware_1.isLoggedIn, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     const foundContact = yield contactSchema_1.Contact.findById(id);
     const mailOptions = {
@@ -157,7 +205,7 @@ app.post(`/contacts/:id/mail`, (req, res) => __awaiter(void 0, void 0, void 0, f
     queue(req);
 }));
 //PUT
-app.put(`/contacts/:id`, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+app.put(`/contacts/:id`, middleware_1.isLoggedIn, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     const contact = yield contactSchema_1.Contact.findByIdAndUpdate(id, req.body, {
         runValidators: true,
@@ -167,7 +215,7 @@ app.put(`/contacts/:id`, (req, res) => __awaiter(void 0, void 0, void 0, functio
     queue(req);
 }));
 //DELETE
-app.delete(`/contacts/:id`, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+app.delete(`/contacts/:id`, middleware_1.isLoggedIn, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     const deletedContact = yield contactSchema_1.Contact.findByIdAndDelete(id);
     res.send(deletedContact);
